@@ -1,14 +1,61 @@
 """
 Fox-AI - Assistente Virtual Amigável
 Um assistente de IA gentil, respeitoso e prestativo para o Firefox
+Powered by TinyLlama 1.1B
 """
 
 from flask import Flask, render_template, request, jsonify
 import random
 import re
 from datetime import datetime
+import warnings
+warnings.filterwarnings('ignore')
 
 app = Flask(__name__, template_folder='templates')
+
+# Flag para controlar uso do modelo de IA
+USE_LLM = True
+
+# Carregar modelo TinyLlama com quantização 4-bit
+print("🤖 Carregando TinyLlama 1.1B (4-bit)... (pode levar alguns minutos na primeira vez)")
+try:
+    from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline, BitsAndBytesConfig
+    
+    model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    
+    # Configuração para quantização 4-bit
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype="float16",
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4"
+    )
+    
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        quantization_config=quantization_config,
+        device_map="auto",
+        low_cpu_mem_usage=True
+    )
+    
+    # Criar pipeline de texto
+    llm_pipeline = pipeline(
+        "text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        max_new_tokens=150,
+        temperature=0.7,
+        top_p=0.9,
+        do_sample=True
+    )
+    print("✅ TinyLlama 4-bit carregado com sucesso! (~$500MB RAM)")
+    USE_LLM = True
+except Exception as e:
+    print(f"⚠️ Erro ao carregar TinyLlama: {e}")
+    print("📝 Usando modo offline (respostas predefinidas)")
+    USE_LLM = False
+    llm_pipeline = None
 
 # Respostas amigáveis e respetuosas do assistente
 class FoxAssistant:
@@ -68,37 +115,65 @@ class FoxAssistant:
         }
     
     def get_response(self, message):
-        message = message.lower().strip()
+        message_lower = message.lower().strip()
         
         # Detectar saudação
-        if any(word in message for word in ['oi', 'ola', 'hello', 'hey', 'bom dia', 'boa tarde', 'boa noite', 'olá', 'oie']):
+        if any(word in message_lower for word in ['oi', 'ola', 'hello', 'hey', 'bom dia', 'boa tarde', 'boa noite', 'olá', 'oie']):
             return random.choice(self.responses['greeting'])
         
         # Detectar como está
-        if any(word in message for word in ['como vai', 'como você está', 'como estas', 'tudo bem', 'como está']):
+        if any(word in message_lower for word in ['como vai', 'como você está', 'como estas', 'tudo bem', 'como está']):
             return random.choice(self.responses['how_are_you'])
         
         # Detectar agradecimento
-        if any(word in message for word in ['obrigado', 'obrigada', 'thanks', 'agradecido', 'grato']):
+        if any(word in message_lower for word in ['obrigado', 'obrigada', 'thanks', 'agradecido', 'grato']):
             return random.choice(self.responses['thanks'])
         
         # Detectar despedida
-        if any(word in message for word in ['tchau', 'adeus', 'bye', 'até logo', 'falou', 'vlw']):
+        if any(word in message_lower for word in ['tchau', 'adeus', 'bye', 'até logo', 'falou', 'vlw']):
             return random.choice(self.responses['goodbye'])
         
         # Detectar pedido de ajuda
-        if any(word in message for word in ['ajuda', 'help', 'pode ajudar', 'me ajuda', 'o que faz', 'o que voce faz']):
+        if any(word in message_lower for word in ['ajuda', 'help', 'pode ajudar', 'me ajuda', 'o que faz', 'o que voce faz']):
             return random.choice(self.responses['help'])
         
         # Detectar piada
-        if any(word in message for word in ['piada', 'piada de', 'me faz rir', 'conta piada', ' joke']):
+        if any(word in message_lower for word in ['piada', 'piada de', 'me faz rir', 'conta piada', ' joke']):
             return random.choice(self.responses['joke'])
         
         # Detectar elogio
-        if any(word in message for word in ['legal', 'incrivel', 'maravilhoso', 'perfeito', 'bom trabalho', 'bem feito', 'parabens', 'elogio']):
+        if any(word in message_lower for word in ['legal', 'incrivel', 'maravilhoso', 'perfeito', 'bom trabalho', 'bem feito', 'parabens', 'elogio']):
             return random.choice(self.responses['compliment'])
         
-        # Resposta padrão
+        # Se TinyLlama estiver disponível, usar para respostas genéricas
+        if USE_LLM and llm_pipeline is not None:
+            try:
+                # Criar prompt no estilo TinyLlama
+                prompt = f"""<system>
+Você é o Fox, um assistente virtual amigável, gentil e prestativo. Você sempre responde de forma educada, respeitosa e com empatia. Use emojis ocasionalmente para deixar a conversa mais divertida.
+</system>
+
+<user>
+{message}
+</system>
+
+<assistant>
+"""
+                result = llm_pipeline(prompt)
+                response = result[0]['generated_text']
+                # Extrair só a resposta do assistente
+                if '<assistant>' in response:
+                    response = response.split('<assistant>')[-1].strip()
+                # Limpar resposta
+                response = response.replace('</assistant>', '').strip()
+                # Limitar tamanho
+                if len(response) > 500:
+                    response = response[:500] + "..."
+                return response
+            except Exception as e:
+                print(f"Erro ao gerar resposta: {e}")
+        
+        # Resposta padrão (fallback)
         return random.choice(self.responses['default'])
 
 # Instanciar o assistente
