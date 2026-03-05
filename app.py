@@ -16,16 +16,25 @@ app = Flask(__name__, template_folder='templates')
 # Flag para controlar uso do modelo de IA
 USE_LLM = True
 
-# Carregar modelo TinyLlama
-print("🤖 Carregando TinyLlama 1.1B... (pode levar alguns minutos na primeira vez)")
+# Carregar modelo TinyLlama com quantização 4-bit
+print("🤖 Carregando TinyLlama 1.1B (4-bit)... (pode levar alguns minutos na primeira vez)")
 try:
-    from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+    from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline, BitsAndBytesConfig
     
     model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    
+    # Configuração para quantização 4-bit
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype="float16",
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4"
+    )
+    
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype="float16",
+        quantization_config=quantization_config,
         device_map="auto",
         low_cpu_mem_usage=True
     )
@@ -40,7 +49,7 @@ try:
         top_p=0.9,
         do_sample=True
     )
-    print("✅ TinyLlama carregado com sucesso!")
+    print("✅ TinyLlama 4-bit carregado com sucesso! (~$500MB RAM)")
     USE_LLM = True
 except Exception as e:
     print(f"⚠️ Erro ao carregar TinyLlama: {e}")
